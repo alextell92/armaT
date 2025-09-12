@@ -1,5 +1,5 @@
-import React, { useState, useCallback, useRef, createRef, forwardRef, useImperativeHandle } from 'react';
-import { StyleSheet, View, Text, StatusBar, Button, LayoutChangeEvent } from 'react-native';
+import React, { useState, useCallback, useRef, createRef, forwardRef, useImperativeHandle, useEffect, useMemo } from 'react';
+import { StyleSheet, View, Text, StatusBar, Button, LayoutChangeEvent, Dimensions, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, {
@@ -7,284 +7,183 @@ import Animated, {
   useAnimatedStyle,
   withSpring,
   runOnJS,
+  withTiming,
+  withSequence,
 } from 'react-native-reanimated';
+// --- IMPORTACIÓN DE COMPONENTES SVG ---
+import Svg, { Image, ClipPath, Path, G } from 'react-native-svg';
+// --- IMPORTACIÓN DEL NUEVO GENERADOR ---
+import { generatePuzzle, PuzzleData, Piece, Slot } from './puzzleGenerator';
 
-// --- Tipos para nuestro juego ---
-interface Piece {
-  id: string; // El id ahora une la pieza con su slot
-  color: string;
-  initialX: number;
-  initialY: number;
-}
-
-interface Slot {
-  id: string; // El id ahora une el slot con su pieza
-  x: number;
-  y: number;
-}
 
 // --- Configuración del Rompecabezas ---
-const PIECE_SIZE = 80;
 const BOARD_MARGIN = 20;
 const SNAP_THRESHOLD = 50;
 
-const PIECES: Piece[] = [
-  { id: 'p1', color: '#f5a623', initialX: 50, initialY: 400 },
-  { id: 'p2', color: '#4a90e2', initialX: 150, initialY: 400 },
-  { id: 'p3', color: '#7ed321', initialX: 50, initialY: 500 },
-  { id: 'p4', color: '#d0021b', initialX: 150, initialY: 500 },
-];
-
-const SLOTS: Slot[] = [
-  { id: 'p3', x: BOARD_MARGIN, y: BOARD_MARGIN + PIECE_SIZE }, // Corresponde a la pieza verde
-  { id: 'p1', x: BOARD_MARGIN, y: BOARD_MARGIN }, // Corresponde a la pieza naranja
-  { id: 'p4', x: BOARD_MARGIN + PIECE_SIZE, y: BOARD_MARGIN + PIECE_SIZE }, // Corresponde a la pieza roja
-  { id: 'p2', x: BOARD_MARGIN + PIECE_SIZE, y: BOARD_MARGIN }, // Corresponde a la pieza azul
-];
-
-const playSound = (soundName: 'snap-correct' | 'snap-wrong') => {
-  console.log(`Reproduciendo sonido: ${soundName}`);
+// --- DEFINICIÓN DEL PAQUETE DE ROMPECABEZAS ---
+const PUZZLE_IMAGE = {
+  uri: 'https://images.pexels.com/photos/110854/pexels-photo-110854.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=2',
+  width: 1260,
+  height: 750,
 };
 
-// --- Tipos para la Ref del Componente ---
-interface DraggablePieceRef {
-  reset: () => void;
-}
+const playSound = (soundName: 'snap-correct' | 'snap-wrong') => { console.log(`Reproduciendo sonido: ${soundName}`); };
 
-// --- Componente de Pieza Arrastrable ---
-const DraggablePiece = forwardRef<DraggablePieceRef, { piece: Piece, targetSlot: Slot, onSnap: (pieceId: string) => void, boardLayout: { x: number, y: number } | null }>(({ piece, targetSlot, onSnap, boardLayout }, ref) => {
-  const { color } = piece;
-  
+interface DraggablePieceRef { reset: () => void; }
+
+const GlowingSlot = ({ slot, isGlowing, boardLayout, pieceSize }: { slot: Slot, isGlowing: boolean, boardLayout: { x: number, y: number } | null, pieceSize: number }) => {
+    const scale = useSharedValue(1);
+    const opacity = useSharedValue(0);
+    useEffect(() => {
+        if (isGlowing) {
+            scale.value = 1;
+            opacity.value = 0;
+            opacity.value = withSequence(withTiming(0.6, { duration: 500 }), withTiming(0, { duration: 500 }));
+            scale.value = withTiming(1.6, { duration: 1000 });
+        }
+    }, [isGlowing, scale, opacity]);
+    const animatedGlowStyle = useAnimatedStyle(() => ({ opacity: opacity.value, transform: [{ scale: scale.value }] }));
+    if (!boardLayout) return null;
+    return <Animated.View style={[ styles.glow, { width: pieceSize, height: pieceSize, top: boardLayout.y + slot.y, left: boardLayout.x + slot.x }, animatedGlowStyle ]} />;
+};
+
+// --- Componente de Pieza Arrastrable (Ahora con SVG) ---
+const DraggablePiece = forwardRef<DraggablePieceRef, { piece: Piece, targetSlot: Slot, onSnap: (pieceId: string) => void, boardLayout: { x: number, y: number } | null, pieceSize: number, pieceSizeInImage: number, image: PuzzleData['image'] }>(({ piece, targetSlot, onSnap, boardLayout, pieceSize, pieceSizeInImage, image }, ref) => {
   const isDragging = useSharedValue(false);
   const isSnapped = useSharedValue(false);
-
   const offsetX = useSharedValue(piece.initialX);
   const offsetY = useSharedValue(piece.initialY);
   const contextX = useSharedValue(0);
   const contextY = useSharedValue(0);
 
-  const resetPosition = useCallback(() => {
-    'worklet';
-    offsetX.value = withSpring(piece.initialX);
-    offsetY.value = withSpring(piece.initialY);
-    isSnapped.value = false;
-  }, [piece.initialX, piece.initialY, offsetX, offsetY, isSnapped]);
-
-  useImperativeHandle(ref, () => ({
-    reset: resetPosition,
-  }));
+  const resetPosition = useCallback(() => { 'worklet'; offsetX.value = withSpring(piece.initialX); offsetY.value = withSpring(piece.initialY); isSnapped.value = false; }, [piece.initialX, piece.initialY, offsetX, offsetY, isSnapped]);
+  useImperativeHandle(ref, () => ({ reset: resetPosition }));
 
   const panGesture = Gesture.Pan()
-    .onStart(() => {
-      if (isSnapped.value) return;
-      contextX.value = offsetX.value;
-      contextY.value = offsetY.value;
-      isDragging.value = true;
-    })
-    .onUpdate((event) => {
-      if (isSnapped.value) return;
-      offsetX.value = contextX.value + event.translationX;
-      offsetY.value = contextY.value + event.translationY;
-    })
+    .onStart(() => { if (isSnapped.value) return; contextX.value = offsetX.value; contextY.value = offsetY.value; isDragging.value = true; })
+    .onUpdate((event) => { if (isSnapped.value) return; offsetX.value = contextX.value + event.translationX; offsetY.value = contextY.value + event.translationY; })
     .onEnd(() => {
-      if (!boardLayout) {
-        offsetX.value = withSpring(piece.initialX);
-        offsetY.value = withSpring(piece.initialY);
-        return;
-      }
-      
-      const absoluteTargetX = boardLayout.x + targetSlot.x;
-      const absoluteTargetY = boardLayout.y + targetSlot.y;
-
-      const distance = Math.sqrt(
-        Math.pow(offsetX.value - absoluteTargetX, 2) +
-        Math.pow(offsetY.value - absoluteTargetY, 2)
-      );
-
-      if (distance < SNAP_THRESHOLD) {
-        offsetX.value = withSpring(absoluteTargetX);
-        offsetY.value = withSpring(absoluteTargetY);
-        isSnapped.value = true;
-        runOnJS(onSnap)(piece.id);
-        runOnJS(playSound)('snap-correct');
-      } else {
-        offsetX.value = withSpring(piece.initialX);
-        offsetY.value = withSpring(piece.initialY);
-        runOnJS(playSound)('snap-wrong');
-      }
+      if (!boardLayout) { offsetX.value = withSpring(piece.initialX); offsetY.value = withSpring(piece.initialY); return; }
+      const absoluteTargetX = boardLayout.x + targetSlot.x; const absoluteTargetY = boardLayout.y + targetSlot.y;
+      const distance = Math.sqrt(Math.pow(offsetX.value - absoluteTargetX, 2) + Math.pow(offsetY.value - absoluteTargetY, 2));
+      if (distance < SNAP_THRESHOLD) { offsetX.value = withSpring(absoluteTargetX); offsetY.value = withSpring(absoluteTargetY); isSnapped.value = true; runOnJS(onSnap)(piece.id); runOnJS(playSound)('snap-correct'); } 
+      else { offsetX.value = withSpring(piece.initialX); offsetY.value = withSpring(piece.initialY); runOnJS(playSound)('snap-wrong'); }
     })
-    .onFinalize(() => {
-      isDragging.value = false;
-    });
+    .onFinalize(() => { isDragging.value = false; });
 
-  const animatedStyle = useAnimatedStyle(() => {
-    'worklet';
-    
-    // CORRECCIÓN: Usamos un borde animado en lugar de una sombra.
-    const borderWidth = withSpring(isSnapped.value ? 4 : 0);
+  const animatedStyle = useAnimatedStyle(() => ({
+    position: 'absolute',
+    transform: [{ translateX: offsetX.value }, { translateY: offsetY.value }, { scale: withSpring(isDragging.value ? 1.2 : 1) },],
+    zIndex: isDragging.value ? 100 : (isSnapped.value ? 10 : 1),
+    width: pieceSize * 1.5,
+    height: pieceSize * 1.5,
+    left: -pieceSize * 0.25,
+    top: -pieceSize * 0.25,
+  }));
 
-    return {
-      width: PIECE_SIZE,
-      height: PIECE_SIZE,
-      borderRadius: 8,
-      backgroundColor: color,
-      position: 'absolute',
-      transform: [
-        { translateX: offsetX.value },
-        { translateY: offsetY.value },
-        { scale: withSpring(isDragging.value ? 1.2 : 1) },
-      ],
-      zIndex: isDragging.value ? 100 : (isSnapped.value ? 10 : 1),
-      
-      // Estilos para el nuevo resplandor con borde
-      borderWidth: borderWidth,
-      borderColor: color,
-    };
-  }, [color]);
+  // --- ERROR CORREGIDO ---
+  // Se elimina la línea que causaba el error y se usa la prop `pieceSizeInImage`.
 
   return (
-    <GestureDetector gesture={panGesture}>
-      <Animated.View style={animatedStyle} />
-    </GestureDetector>
+    <Animated.View style={animatedStyle}>
+      <Svg width={pieceSize * 1.5} height={pieceSize * 1.5} viewBox={`0 0 ${pieceSizeInImage * 1.5} ${pieceSizeInImage * 1.5}`}>
+        <G transform={`translate(${pieceSizeInImage * 0.25}, ${pieceSizeInImage * 0.25})`}>
+          <ClipPath id={`clip_${piece.id}`}>
+            <Path d={piece.svgClipPath} />
+          </ClipPath>
+          <Image
+            href={image.uri}
+            width={image.width}
+            height={image.height}
+            preserveAspectRatio="xMidYMid slice"
+            x={-piece.sourceX}
+            y={-piece.sourceY}
+            clipPath={`url(#clip_${piece.id})`}
+          />
+        </G>
+      </Svg>
+    </Animated.View>
   );
 });
 
-// --- Componente Principal de la App ---
 const App = () => {
+  const [puzzle, setPuzzle] = useState<PuzzleData | null>(null);
   const [snappedPieces, setSnappedPieces] = useState<Set<string>>(new Set());
   const [boardLayout, setBoardLayout] = useState<{ x: number, y: number } | null>(null);
+  const [glowingSlots, setGlowingSlots] = useState<Set<string>>(new Set());
   
-  const pieceRefs = useRef(
-    PIECES.map(() => createRef<DraggablePieceRef>())
-  ).current;
-
-  const handleSnap = useCallback((pieceId: string) => {
-    setSnappedPieces(prev => new Set(prev).add(pieceId));
+  const pieceRefs = useMemo(() => puzzle ? puzzle.pieces.map(() => createRef<DraggablePieceRef>()) : [], [puzzle]);
+  
+  const createNewPuzzle = useCallback((rows: number, cols: number) => {
+    const { width, height } = Dimensions.get('window');
+    const newPuzzle = generatePuzzle({
+      gridSize: { rows, cols },
+      image: PUZZLE_IMAGE,
+      screenWidth: width,
+      screenHeight: height,
+      boardMargin: BOARD_MARGIN,
+    });
+    setPuzzle(newPuzzle);
+    setSnappedPieces(new Set());
+    setGlowingSlots(new Set());
+    setBoardLayout(null);
   }, []);
 
-  const handleReset = () => {
-    setSnappedPieces(new Set());
-    pieceRefs.forEach(ref => {
-        ref.current?.reset();
-    });
-  };
-  
-  const handleBoardLayout = (event: LayoutChangeEvent) => {
-    const { x, y } = event.nativeEvent.layout;
-    setBoardLayout({ x, y });
-  };
+  useEffect(() => { createNewPuzzle(2, 3); }, [createNewPuzzle]);
 
-  const hasWon = snappedPieces.size === PIECES.length;
+  const handleSnap = useCallback((pieceId: string) => { setSnappedPieces(prev => new Set(prev).add(pieceId)); setGlowingSlots(prev => new Set(prev).add(pieceId)); }, []);
+  const handleBoardLayout = (event: LayoutChangeEvent) => { const { x, y } = event.nativeEvent.layout; setBoardLayout({ x, y }); };
+
+  const hasWon = puzzle && snappedPieces.size === puzzle.pieces.length;
+
+  if (!puzzle) { return <View style={styles.loadingContainer}><ActivityIndicator size="large" /><Text>Generando Rompecabezas...</Text></View>; }
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <StatusBar barStyle="dark-content" />
-        <View style={styles.header}>
-            <Text style={styles.title}>Rompecabezas 2D</Text>
-            <Text style={styles.progressText}>
-                Completado: {snappedPieces.size} / {PIECES.length}
-            </Text>
+        <View style={styles.header}><Text style={styles.title}>Rompecabezas</Text><Text style={styles.progressText}>Completado: {snappedPieces.size} / {puzzle.pieces.length}</Text></View>
+        <View style={[styles.board, { width: puzzle.boardSize.width, height: puzzle.boardSize.height }]} onLayout={handleBoardLayout}>
+          {puzzle.slots.map(slot => <View key={`slot_${slot.id}`} style={[styles.slot, { width: puzzle.pieceSize, height: puzzle.pieceSize, top: slot.y, left: slot.x }]} />)}
         </View>
+
+        {boardLayout && puzzle.slots.map(slot => <GlowingSlot key={`glow_${slot.id}`} slot={slot} isGlowing={glowingSlots.has(slot.id)} boardLayout={boardLayout} pieceSize={puzzle.pieceSize} />)}
         
-        <View style={styles.board} onLayout={handleBoardLayout}>
-          {SLOTS.map(slot => (
-            <View key={slot.id} style={[styles.slot, { top: slot.y, left: slot.x }]} />
-          ))}
-        </View>
-
-        {boardLayout && PIECES.map((piece, index) => {
-          const targetSlot = SLOTS.find(slot => slot.id === piece.id);
+        {boardLayout && puzzle.pieces.map((piece, index) => {
+          const targetSlot = puzzle.slots.find(slot => slot.id === piece.id);
           if (!targetSlot) return null;
-
-          return (
-            <DraggablePiece 
-                ref={pieceRefs[index]}
-                key={piece.id} 
-                piece={piece} 
-                targetSlot={targetSlot}
-                onSnap={handleSnap}
-                boardLayout={boardLayout}
-            />
-          );
+          return <DraggablePiece 
+            ref={pieceRefs[index]} 
+            key={piece.id} 
+            piece={piece} 
+            targetSlot={targetSlot} 
+            onSnap={handleSnap} 
+            boardLayout={boardLayout} 
+            pieceSize={puzzle.pieceSize} 
+            pieceSizeInImage={puzzle.pieceSizeInImage} // Se pasa la nueva prop
+            image={puzzle.image} 
+          />;
         })}
 
-        {hasWon && (
-            <View style={styles.winContainer}>
-                <Text style={styles.winText}>¡Felicidades, has ganado!</Text>
-            </View>
-        )}
-        
-        <View style={styles.footer}>
-            <Button title="Reiniciar Juego" onPress={handleReset} />
-        </View>
+        {hasWon && <View style={styles.winContainer}><Text style={styles.winText}>¡Felicidades!</Text></View>}
+        <View style={styles.footer}><Button title="Nuevo (2x3)" onPress={() => createNewPuzzle(2, 3)} /><Button title="Nuevo (3x4)" onPress={() => createNewPuzzle(3, 4)} /></View>
       </SafeAreaView>
     </GestureHandlerRootView>
   );
 };
 
-// --- Estilos ---
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f0f0f0',
-  },
-  header: {
-    paddingVertical: 15,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    textAlign: 'center',
-    color: '#333',
-  },
-  progressText: {
-    fontSize: 16,
-    textAlign: 'center',
-    color: '#666',
-    marginTop: 5,
-  },
-  board: {
-    width: PIECE_SIZE * 2 + BOARD_MARGIN * 2,
-    height: PIECE_SIZE * 2 + BOARD_MARGIN * 2,
-    alignSelf: 'center',
-    borderWidth: 2,
-    borderColor: '#ccc',
-    borderRadius: 8,
-    backgroundColor: '#fff',
-    marginTop: 20,
-  },
-  slot: {
-    width: PIECE_SIZE,
-    height: PIECE_SIZE,
-    position: 'absolute',
-    borderWidth: 1,
-    borderStyle: 'dashed',
-    borderColor: '#aaa',
-    backgroundColor: 'rgba(0,0,0,0.05)',
-  },
-  // La pieza ya no necesita estilos aquí, ya que se manejan en el useAnimatedStyle
-  piece: {},
-  footer: {
-      position: 'absolute',
-      bottom: 30,
-      left: 0,
-      right: 0,
-      alignItems: 'center',
-  },
-  winContainer: {
-    marginTop: 30,
-    padding: 20,
-    backgroundColor: '#7ed321',
-    borderRadius: 10,
-    alignSelf: 'center',
-  },
-  winText: {
-    color: 'white',
-    fontSize: 20,
-    fontWeight: 'bold',
-    textAlign: 'center',
-  }
+  container: { flex: 1, backgroundColor: '#f0f0f0' },
+  header: { paddingVertical: 15 },
+  title: { fontSize: 28, fontWeight: 'bold', textAlign: 'center', color: '#333' },
+  progressText: { fontSize: 16, textAlign: 'center', color: '#666', marginTop: 5 },
+  board: { alignSelf: 'center', borderWidth: 2, borderColor: '#ccc', borderRadius: 8, backgroundColor: '#fff', marginTop: 20 },
+  slot: { position: 'absolute', borderWidth: 1, borderStyle: 'dashed', borderColor: '#aaa', backgroundColor: 'rgba(0,0,0,0.05)' },
+  glow: { borderRadius: 8, backgroundColor: '#FFD700', position: 'absolute', zIndex: 50 },
+  footer: { position: 'absolute', bottom: 30, left: 0, right: 0, flexDirection: 'row', justifyContent: 'space-evenly' },
+  winContainer: { position: 'absolute', top: '40%', alignSelf: 'center', padding: 20, backgroundColor: 'rgba(34, 139, 34, 0.85)', borderRadius: 10 },
+  winText: { color: 'white', fontSize: 24, fontWeight: 'bold' },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' }
 });
 
 export default App;
