@@ -11,7 +11,7 @@ import Animated, {
   withSequence,
 } from 'react-native-reanimated';
 // --- IMPORTACIÓN DE COMPONENTES SVG ---
-import Svg, { Image, ClipPath, Path, G } from 'react-native-svg';
+import Svg, { Image, ClipPath, Path } from 'react-native-svg';
 // --- IMPORTACIÓN DEL NUEVO GENERADOR ---
 import { generatePuzzle, PuzzleData, Piece, Slot } from './puzzleGenerator';
 
@@ -77,30 +77,37 @@ const DraggablePiece = forwardRef<DraggablePieceRef, { piece: Piece, targetSlot:
     zIndex: isDragging.value ? 100 : (isSnapped.value ? 10 : 1),
     width: pieceSize * 1.5,
     height: pieceSize * 1.5,
+    // Se ajusta el posicionamiento para centrar la pieza correctamente
     left: -pieceSize * 0.25,
     top: -pieceSize * 0.25,
   }));
 
-  // --- ERROR CORREGIDO ---
-  // Se elimina la línea que causaba el error y se usa la prop `pieceSizeInImage`.
+  // --- CORRECCIÓN DEL SVG ---
+  // Se calcula el viewBox para centrar la pieza sin usar un <G> transform.
+  const viewBoxMinX = -pieceSizeInImage * 0.25;
+  const viewBoxMinY = -pieceSizeInImage * 0.25;
+  const viewBoxWidth = pieceSizeInImage * 1.5;
+  const viewBoxHeight = pieceSizeInImage * 1.5;
 
   return (
     <Animated.View style={animatedStyle}>
-      <Svg width={pieceSize * 1.5} height={pieceSize * 1.5} viewBox={`0 0 ${pieceSizeInImage * 1.5} ${pieceSizeInImage * 1.5}`}>
-        <G transform={`translate(${pieceSizeInImage * 0.25}, ${pieceSizeInImage * 0.25})`}>
-          <ClipPath id={`clip_${piece.id}`}>
-            <Path d={piece.svgClipPath} />
-          </ClipPath>
-          <Image
-            href={image.uri}
-            width={image.width}
-            height={image.height}
-            preserveAspectRatio="xMidYMid slice"
-            x={-piece.sourceX}
-            y={-piece.sourceY}
-            clipPath={`url(#clip_${piece.id})`}
-          />
-        </G>
+      <Svg 
+        width={pieceSize * 1.5} 
+        height={pieceSize * 1.5} 
+        viewBox={`${viewBoxMinX} ${viewBoxMinY} ${viewBoxWidth} ${viewBoxHeight}`}
+      >
+        <ClipPath id={`clip_${piece.id}`}>
+          <Path d={piece.svgClipPath} />
+        </ClipPath>
+        <Image
+          href={image.uri}
+          width={image.width}
+          height={image.height}
+          preserveAspectRatio="xMidYMid slice"
+          x={-piece.sourceX}
+          y={-piece.sourceY}
+          clipPath={`url(#clip_${piece.id})`}
+        />
       </Svg>
     </Animated.View>
   );
@@ -160,7 +167,7 @@ const App = () => {
             onSnap={handleSnap} 
             boardLayout={boardLayout} 
             pieceSize={puzzle.pieceSize} 
-            pieceSizeInImage={puzzle.pieceSizeInImage} // Se pasa la nueva prop
+            pieceSizeInImage={puzzle.pieceSizeInImage}
             image={puzzle.image} 
           />;
         })}
