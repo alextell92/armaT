@@ -1,5 +1,5 @@
-import React, { useState, useCallback } from 'react';
-import { StyleSheet, View, Text, StatusBar, Button } from 'react-native';
+import React, { useState, useCallback, useRef, createRef, forwardRef, useImperativeHandle } from 'react';
+import { StyleSheet, View, Text, StatusBar, Button, LayoutChangeEvent } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, {
@@ -7,7 +7,6 @@ import Animated, {
   useAnimatedStyle,
   withSpring,
   runOnJS,
-  runOnUI,
 } from 'react-native-reanimated';
 
 // --- Tipos para nuestro juego ---
@@ -29,7 +28,6 @@ const PIECE_SIZE = 80;
 const BOARD_MARGIN = 20;
 const SNAP_THRESHOLD = 50;
 
-// Las piezas y slots ahora comparten un 'id' para vincularlos
 const PIECES: Piece[] = [
   { id: 'p1', color: '#f5a623', initialX: 50, initialY: 400 },
   { id: 'p2', color: '#4a90e2', initialX: 150, initialY: 400 },
@@ -45,14 +43,18 @@ const SLOTS: Slot[] = [
 ];
 
 const playSound = (soundName: 'snap-correct' | 'snap-wrong') => {
-  // En una app real, aquí iría la lógica para reproducir un sonido.
   console.log(`Reproduciendo sonido: ${soundName}`);
 };
 
+// --- Tipos para la Ref del Componente ---
+interface DraggablePieceRef {
+  reset: () => void;
+}
 
 // --- Componente de Pieza Arrastrable ---
-// Le pasamos una función para notificar al padre cuando una pieza encaja
-const DraggablePiece = ({ piece, targetSlot, onSnap }: { piece: Piece, targetSlot: Slot, onSnap: (pieceId: string) => void }) => {
+const DraggablePiece = forwardRef<DraggablePieceRef, { piece: Piece, targetSlot: Slot, onSnap: (pieceId: string) => void, boardLayout: { x: number, y: number } | null }>(({ piece, targetSlot, onSnap, boardLayout }, ref) => {
+  const { color } = piece;
+  
   const isDragging = useSharedValue(false);
   const isSnapped = useSharedValue(false);
 
@@ -61,18 +63,16 @@ const DraggablePiece = ({ piece, targetSlot, onSnap }: { piece: Piece, targetSlo
   const contextX = useSharedValue(0);
   const contextY = useSharedValue(0);
 
-  // **MEJORA**: Creamos una función para reiniciar la posición que se puede llamar desde fuera
   const resetPosition = useCallback(() => {
-    'worklet'; // Indicamos que esta función puede ejecutarse en el UI thread
+    'worklet';
     offsetX.value = withSpring(piece.initialX);
     offsetY.value = withSpring(piece.initialY);
     isSnapped.value = false;
-  }, [piece, offsetX, offsetY, isSnapped]);
-  
-  // Hacemos la función accesible para el componente padre
-  // (Esta es una forma avanzada, otra sería manejar el estado en el padre)
-  piece.reset = resetPosition;
+  }, [piece.initialX, piece.initialY, offsetX, offsetY, isSnapped]);
 
+  useImperativeHandle(ref, () => ({
+    reset: resetPosition,
+  }));
 
   const panGesture = Gesture.Pan()
     .onStart(() => {
@@ -87,17 +87,24 @@ const DraggablePiece = ({ piece, targetSlot, onSnap }: { piece: Piece, targetSlo
       offsetY.value = contextY.value + event.translationY;
     })
     .onEnd(() => {
+      if (!boardLayout) {
+        offsetX.value = withSpring(piece.initialX);
+        offsetY.value = withSpring(piece.initialY);
+        return;
+      }
+      
+      const absoluteTargetX = boardLayout.x + targetSlot.x;
+      const absoluteTargetY = boardLayout.y + targetSlot.y;
+
       const distance = Math.sqrt(
-        Math.pow(offsetX.value - targetSlot.x, 2) +
-        Math.pow(offsetY.value - targetSlot.y, 2)
+        Math.pow(offsetX.value - absoluteTargetX, 2) +
+        Math.pow(offsetY.value - absoluteTargetY, 2)
       );
 
-      // La lógica principal no cambia, pero ahora es más robusta
       if (distance < SNAP_THRESHOLD) {
-        offsetX.value = withSpring(targetSlot.x);
-        offsetY.value = withSpring(targetSlot.y);
+        offsetX.value = withSpring(absoluteTargetX);
+        offsetY.value = withSpring(absoluteTargetY);
         isSnapped.value = true;
-        // Notificamos al componente padre que esta pieza ha encajado
         runOnJS(onSnap)(piece.id);
         runOnJS(playSound)('snap-correct');
       } else {
@@ -110,45 +117,61 @@ const DraggablePiece = ({ piece, targetSlot, onSnap }: { piece: Piece, targetSlo
       isDragging.value = false;
     });
 
-  const animatedStyle = useAnimatedStyle(() => ({
-    position: 'absolute',
-    transform: [
-      { translateX: offsetX.value },
-      { translateY: offsetY.value },
-      { scale: withSpring(isDragging.value ? 1.2 : 1) },
-    ],
-    zIndex: isDragging.value ? 100 : isSnapped.value ? 1 : 10,
-  }));
+  const animatedStyle = useAnimatedStyle(() => {
+    'worklet';
+    
+    // CORRECCIÓN: Usamos un borde animado en lugar de una sombra.
+    const borderWidth = withSpring(isSnapped.value ? 4 : 0);
+
+    return {
+      width: PIECE_SIZE,
+      height: PIECE_SIZE,
+      borderRadius: 8,
+      backgroundColor: color,
+      position: 'absolute',
+      transform: [
+        { translateX: offsetX.value },
+        { translateY: offsetY.value },
+        { scale: withSpring(isDragging.value ? 1.2 : 1) },
+      ],
+      zIndex: isDragging.value ? 100 : (isSnapped.value ? 10 : 1),
+      
+      // Estilos para el nuevo resplandor con borde
+      borderWidth: borderWidth,
+      borderColor: color,
+    };
+  }, [color]);
 
   return (
     <GestureDetector gesture={panGesture}>
-      <Animated.View style={animatedStyle}>
-        <View style={[styles.piece, { backgroundColor: piece.color }]} />
-      </Animated.View>
+      <Animated.View style={animatedStyle} />
     </GestureDetector>
   );
-};
+});
 
 // --- Componente Principal de la App ---
 const App = () => {
-  // **MEJORA**: Estado para saber qué piezas ya están colocadas
   const [snappedPieces, setSnappedPieces] = useState<Set<string>>(new Set());
+  const [boardLayout, setBoardLayout] = useState<{ x: number, y: number } | null>(null);
   
-  // **MEJORA**: Función que se llama cuando una pieza encaja
+  const pieceRefs = useRef(
+    PIECES.map(() => createRef<DraggablePieceRef>())
+  ).current;
+
   const handleSnap = useCallback((pieceId: string) => {
     setSnappedPieces(prev => new Set(prev).add(pieceId));
   }, []);
 
-  // **MEJORA**: Lógica de reinicio
   const handleReset = () => {
-    // Limpiamos el estado de las piezas encajadas
     setSnappedPieces(new Set());
-    // Recorremos las piezas y llamamos a su función de reinicio
-    PIECES.forEach(p => {
-        if (p.reset) {
-            runOnUI(p.reset)();
-        }
+    pieceRefs.forEach(ref => {
+        ref.current?.reset();
     });
+  };
+  
+  const handleBoardLayout = (event: LayoutChangeEvent) => {
+    const { x, y } = event.nativeEvent.layout;
+    setBoardLayout({ x, y });
   };
 
   const hasWon = snappedPieces.size === PIECES.length;
@@ -164,28 +187,28 @@ const App = () => {
             </Text>
         </View>
         
-        <View style={styles.board}>
+        <View style={styles.board} onLayout={handleBoardLayout}>
           {SLOTS.map(slot => (
             <View key={slot.id} style={[styles.slot, { top: slot.y, left: slot.x }]} />
           ))}
         </View>
 
-        {PIECES.map(piece => {
-          // **MEJORA**: Buscamos el slot correcto para esta pieza basándonos en el ID
+        {boardLayout && PIECES.map((piece, index) => {
           const targetSlot = SLOTS.find(slot => slot.id === piece.id);
-          if (!targetSlot) return null; // No debería pasar si la configuración es correcta
+          if (!targetSlot) return null;
 
           return (
             <DraggablePiece 
+                ref={pieceRefs[index]}
                 key={piece.id} 
                 piece={piece} 
                 targetSlot={targetSlot}
                 onSnap={handleSnap}
+                boardLayout={boardLayout}
             />
           );
         })}
 
-        {/* **MEJORA**: Mostramos un mensaje de victoria y el botón de reinicio */}
         {hasWon && (
             <View style={styles.winContainer}>
                 <Text style={styles.winText}>¡Felicidades, has ganado!</Text>
@@ -240,16 +263,8 @@ const styles = StyleSheet.create({
     borderColor: '#aaa',
     backgroundColor: 'rgba(0,0,0,0.05)',
   },
-  piece: {
-    width: PIECE_SIZE,
-    height: PIECE_SIZE,
-    borderRadius: 8,
-    elevation: 5,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-  },
+  // La pieza ya no necesita estilos aquí, ya que se manejan en el useAnimatedStyle
+  piece: {},
   footer: {
       position: 'absolute',
       bottom: 30,
@@ -273,3 +288,4 @@ const styles = StyleSheet.create({
 });
 
 export default App;
+
