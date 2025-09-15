@@ -1,10 +1,10 @@
 {
   "gridSize": {
-    "rows": 2,
-    "cols": 3
+    "rows": 3,
+    "cols": 5
   },
-  "imageAspectRatio": 1.5,
-  "pieceSizeInImage": 640,
+  "imageAspectRatio": 1.6666666666666667,
+  "pieceSizeInImage": 289,
   "pieces": [
     {
       "id": "r0c0",
@@ -19,6 +19,14 @@
       "assetUri": "piece_r0c2.png"
     },
     {
+      "id": "r0c3",
+      "assetUri": "piece_r0c3.png"
+    },
+    {
+      "id": "r0c4",
+      "assetUri": "piece_r0c4.png"
+    },
+    {
       "id": "r1c0",
       "assetUri": "piece_r1c0.png"
     },
@@ -29,6 +37,34 @@
     {
       "id": "r1c2",
       "assetUri": "piece_r1c2.png"
+    },
+    {
+      "id": "r1c3",
+      "assetUri": "piece_r1c3.png"
+    },
+    {
+      "id": "r1c4",
+      "assetUri": "piece_r1c4.png"
+    },
+    {
+      "id": "r2c0",
+      "assetUri": "piece_r2c0.png"
+    },
+    {
+      "id": "r2c1",
+      "assetUri": "piece_r2c1.png"
+    },
+    {
+      "id": "r2c2",
+      "assetUri": "piece_r2c2.png"
+    },
+    {
+      "id": "r2c3",
+      "assetUri": "piece_r2c3.png"
+    },
+    {
+      "id": "r2c4",
+      "assetUri": "piece_r2c4.png"
     }
   ]
 }
