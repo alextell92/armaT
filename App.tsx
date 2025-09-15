@@ -53,7 +53,7 @@ const PRE_GENERATED_LEVELS = {
         images: {
             background: require('./assets/puzzles/mundo1/nivel1/background.png'),
             pieces: {
-                'r0c0': require('./assets/puzzles/mundo1/nivel1/piece_r0c0.png'), 'r0c1': require('./assets-puzzles/mundo1/nivel1/piece_r0c1.png'),
+                'r0c0': require('./assets/puzzles/mundo1/nivel1/piece_r0c0.png'), 'r0c1': require('./assets/puzzles/mundo1/nivel1/piece_r0c1.png'),
                 'r0c2': require('./assets/puzzles/mundo1/nivel1/piece_r0c2.png'), 'r1c0': require('./assets/puzzles/mundo1/nivel1/piece_r1c0.png'),
                 'r1c1': require('./assets/puzzles/mundo1/nivel1/piece_r1c1.png'), 'r1c2': require('./assets/puzzles/mundo1/nivel1/piece_r1c2.png'),
             } as PieceImageMap,
@@ -175,14 +175,7 @@ const App = () => {
         boardHeight = boardWidth / imageAspectRatio;
     }
     
-    // --- LÓGICA SIMPLIFICADA ---
-    // Esta lógica ahora es correcta porque el 'imageAspectRatio' del JSON
-    // ya coincide con el aspect ratio de la cuadrícula (cols/rows).
     const pieceSize = boardWidth / gridSize.cols;
-
-    // Ya no es necesario recalcular boardWidth y boardHeight, porque la proporción ya es correcta.
-    // boardWidth = pieceSize * gridSize.cols;
-    // boardHeight = pieceSize * gridSize.rows;
 
     const trayScale = (trayHeight * 0.8) / (pieceSize * PIECE_ASSET_TO_LOGICAL_RATIO);
     const pieceInTraySize = pieceSize * PIECE_ASSET_TO_LOGICAL_RATIO * trayScale;
@@ -267,6 +260,43 @@ const App = () => {
                     </View>
                     
                     <View style={[styles.boardFrame, { width: frameWidth, height: frameHeight, top: frameY, left: frameX }]} />
+
+                    {/* --- NUEVO: Guías visuales para las piezas en el tablero --- */}
+                    {puzzle.pieces.map(p => {
+                        if (snappedPieces.has(p.id)) {
+                            return null; // No renderizar la guía si la pieza ya está colocada
+                        }
+                        const pieceLogicalSize = puzzle.pieceSize;
+                        const pieceVisualSize = pieceLogicalSize * PIECE_ASSET_TO_LOGICAL_RATIO;
+                        const visualOffset = (pieceVisualSize - pieceLogicalSize) / 2;
+                        const finalX = boardPosition.x + p.slot.x;
+                        const finalY = boardPosition.y + p.slot.y;
+
+                        return (
+                            <View
+                                key={`hint-${p.id}`}
+                                style={[
+                                    styles.staticPiece,
+                                    {
+                                        width: pieceLogicalSize,
+                                        height: pieceLogicalSize,
+                                        transform: [{ translateX: finalX }, { translateY: finalY }],
+                                        zIndex: 1, // Se asegura que esté por debajo de las piezas arrastrables
+                                    }
+                                ]}
+                            >
+                                <RNImage
+                                    source={currentLevel!.images.pieces[p.id]}
+                                    style={{
+                                        width: pieceVisualSize,
+                                        height: pieceVisualSize,
+                                        transform: [{ translateX: -visualOffset }, { translateY: -visualOffset }],
+                                        opacity: 0.2 // Se aplica opacidad para que parezca una sombra o guía
+                                    }}
+                                />
+                            </View>
+                        );
+                    })}
                 </>
             )}
         </View>
@@ -327,6 +357,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     borderRadius: 8,
     overflow: 'hidden',
+    zIndex: 0,
   },
   boardImage: { 
     width: '100%', 
@@ -339,6 +370,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255, 255, 255, 0.7)',
     borderRadius: 12,
     pointerEvents: 'none',
+    zIndex: 2,
   },
   staticPiece: { 
     position: 'absolute', 
