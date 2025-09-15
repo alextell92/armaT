@@ -1,0 +1,34 @@
+{
+  "gridSize": {
+    "rows": 2,
+    "cols": 3
+  },
+  "imageAspectRatio": 1.5,
+  "pieceSizeInImage": 640,
+  "pieces": [
+    {
+      "id": "r0c0",
+      "assetUri": "piece_r0c0.png"
+    },
+    {
+      "id": "r0c1",
+      "assetUri": "piece_r0c1.png"
+    },
+    {
+      "id": "r0c2",
+      "assetUri": "piece_r0c2.png"
+    },
+    {
+      "id": "r1c0",
+      "assetUri": "piece_r1c0.png"
+    },
+    {
+      "id": "r1c1",
+      "assetUri": "piece_r1c1.png"
+    },
+    {
+      "id": "r1c2",
+      "assetUri": "piece_r1c2.png"
+    }
+  ]
+}

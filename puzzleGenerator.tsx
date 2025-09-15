@@ -47,62 +47,64 @@ export interface PuzzleConfig {
 }
 
 /**
- * CORREGIDO: Genera la ruta SVG para un lado de la pieza, dependiendo de su dirección.
- * @param edgeType El tipo de muesca.
- * @param pieceSize El tamaño de la pieza.
- * @param direction La dirección en la que se dibuja el lado.
- * @returns Una cadena con los comandos de la ruta SVG.
+ * Genera la ruta SVG para un lado de la pieza, garantizando que las muescas sean simétricas.
  */
 const getEdgePath = (edgeType: EdgeType, pieceSize: number, direction: 'right' | 'down' | 'left' | 'up'): string => {
-    const notchSize = pieceSize * 0.4;
-    const sweep = pieceSize * 0.25;
+    if (edgeType === EdgeType.FLAT) {
+        switch (direction) {
+            case 'right': return `l ${pieceSize},0`;
+            case 'down':  return `l 0,${pieceSize}`;
+            case 'left':  return `l ${-pieceSize},0`;
+            case 'up':    return `l 0,${-pieceSize}`;
+        }
+    }
+
+    const notchWidth = pieceSize * 0.4;
+    const notchHeight = pieceSize * 0.22;
+    const lineSegment = (pieceSize - notchWidth) / 2;
+
+    const notchDirection = edgeType === EdgeType.OUT ? 1 : -1;
     let path = '';
 
-    // Los comandos relativos (c, s, l) facilitan el dibujo
     switch (direction) {
-        case 'right':
-            if (edgeType === EdgeType.FLAT) path = `l ${pieceSize},0`;
-            else if (edgeType === EdgeType.IN) path = `c ${sweep},0 ${sweep},${-notchSize} ${pieceSize / 2},${-notchSize} s 0,${notchSize} ${pieceSize / 2},${notchSize}`;
-            else path = `c ${sweep},0 ${sweep},${notchSize} ${pieceSize / 2},${notchSize} s 0,${-notchSize} ${pieceSize / 2},${-notchSize}`;
+        case 'right': {
+            const nH = notchHeight * notchDirection;
+            path = `l ${lineSegment},0 c 0,${nH} ${notchWidth},${nH} ${notchWidth},0 l ${lineSegment},0`;
             break;
-        case 'down':
-            if (edgeType === EdgeType.FLAT) path = `l 0,${pieceSize}`;
-            else if (edgeType === EdgeType.IN) path = `c 0,${sweep} ${notchSize},${sweep} ${notchSize},${pieceSize / 2} s ${-notchSize},0 ${-notchSize},${pieceSize / 2}`;
-            else path = `c 0,${sweep} ${-notchSize},${sweep} ${-notchSize},${pieceSize / 2} s ${notchSize},0 ${notchSize},${pieceSize / 2}`;
+        }
+        case 'down': {
+            const nH = notchHeight * notchDirection;
+            path = `l 0,${lineSegment} c ${nH},0 ${nH},${notchWidth} 0,${notchWidth} l 0,${lineSegment}`;
             break;
-        case 'left':
-            if (edgeType === EdgeType.FLAT) path = `l ${-pieceSize},0`;
-            else if (edgeType === EdgeType.IN) path = `c ${-sweep},0 ${-sweep},${notchSize} ${-pieceSize / 2},${notchSize} s 0,${-notchSize} ${-pieceSize / 2},${-notchSize}`;
-            else path = `c ${-sweep},0 ${-sweep},${-notchSize} ${-pieceSize / 2},${-notchSize} s 0,${notchSize} ${-pieceSize / 2},${notchSize}`;
+        }
+        case 'left': {
+            const nH = notchHeight * -notchDirection;
+            path = `l ${-lineSegment},0 c 0,${nH} ${-notchWidth},${nH} ${-notchWidth},0 l ${-lineSegment},0`;
             break;
-        case 'up':
-            if (edgeType === EdgeType.FLAT) path = `l 0,${-pieceSize}`;
-            else if (edgeType === EdgeType.IN) path = `c 0,${-sweep} ${-notchSize},${-sweep} ${-notchSize},${-pieceSize / 2} s ${notchSize},0 ${notchSize},${-pieceSize / 2}`;
-            else path = `c 0,${-sweep} ${notchSize},${-sweep} ${notchSize},${-pieceSize / 2} s ${-notchSize},0 ${-notchSize},${-pieceSize / 2}`;
+        }
+        case 'up': {
+            const nH = notchHeight * -notchDirection;
+            path = `l 0,${-lineSegment} c ${nH},0 ${nH},${-notchWidth} 0,${-notchWidth} l 0,${-lineSegment}`;
             break;
+        }
     }
     return path;
 };
 
+
 /**
- * CORREGIDO: Construye una única ruta SVG continua y cerrada para la pieza.
- * @param shape La forma de los cuatro lados de la pieza.
- * @param pieceSize El tamaño de la pieza.
- * @returns La cadena de la ruta SVG completa.
+ * Construye una única ruta SVG continua y cerrada para la pieza.
  */
 const buildPiecePath = (shape: Piece['shape'], pieceSize: number): string => {
   const { top, right, bottom, left } = shape;
-
-  // La ruta empieza en la esquina superior izquierda
   const commands = [`M 0,0`];
   
-  // Se añaden los comandos para cada lado en orden
   commands.push(getEdgePath(top, pieceSize, 'right'));
   commands.push(getEdgePath(right, pieceSize, 'down'));
   commands.push(getEdgePath(bottom, pieceSize, 'left'));
   commands.push(getEdgePath(left, pieceSize, 'up'));
 
-  commands.push('Z'); // Se cierra la ruta
+  commands.push('Z'); // Cierra la ruta
   
   return commands.join(' ');
 };
@@ -114,48 +116,55 @@ export const generatePuzzle = (config: PuzzleConfig): PuzzleData => {
   const { gridSize, image, screenWidth, screenHeight, boardMargin } = config;
   const { rows, cols } = gridSize;
   
-  const availableWidth = screenWidth - (boardMargin * 2);
-  const pieceSizeOnScreen = Math.floor(availableWidth / cols);
-  const pieceSizeInImage = Math.floor(image.width / cols);
+  const availableHeight = screenHeight * 0.9 - (boardMargin * 2);
+  const imageAspectRatio = image.width / image.height;
+  
+  let boardHeight = availableHeight;
+  let boardWidth = boardHeight * imageAspectRatio;
 
-  const boardWidth = pieceSizeOnScreen * cols;
-  const boardHeight = pieceSizeOnScreen * rows;
+  const pieceSizeOnScreen = Math.floor(boardHeight / rows);
+  const pieceSizeInImage = Math.floor(image.height / rows);
+
+  boardWidth = pieceSizeOnScreen * cols;
+  boardHeight = pieceSizeOnScreen * rows;
 
   const slots: Slot[] = [];
   const pieces: Piece[] = [];
   
-  const pieceShapes: Piece['shape'][][] = Array(rows).fill(0).map(() => Array(cols).fill({ top: EdgeType.FLAT, right: EdgeType.FLAT, bottom: EdgeType.FLAT, left: EdgeType.FLAT }));
+  const pieceShapes: Piece['shape'][][] = Array(rows).fill(0).map(() => Array(cols).fill(0).map(() => ({ top: EdgeType.FLAT, right: EdgeType.FLAT, bottom: EdgeType.FLAT, left: EdgeType.FLAT })));
 
-  // 1. Determinar la forma de cada pieza, asegurando que los bordes coincidan
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       const shape: Piece['shape'] = { top: EdgeType.FLAT, right: EdgeType.FLAT, bottom: EdgeType.FLAT, left: EdgeType.FLAT };
       
       shape.top = r === 0 ? EdgeType.FLAT : (pieceShapes[r-1][c].bottom === EdgeType.IN ? EdgeType.OUT : EdgeType.IN);
       shape.left = c === 0 ? EdgeType.FLAT : (pieceShapes[r][c-1].right === EdgeType.IN ? EdgeType.OUT : EdgeType.IN);
-      shape.right = c === cols - 1 ? EdgeType.FLAT : (Math.random() > 0.5 ? EdgeType.IN : EdgeType.OUT);
-      shape.bottom = r === rows - 1 ? EdgeType.FLAT : (Math.random() > 0.5 ? EdgeType.IN : EdgeType.OUT);
+      shape.right = c === cols - 1 ? EdgeType.FLAT : (c % 2 === 0 ? EdgeType.OUT : EdgeType.IN);
+      shape.bottom = r === rows - 1 ? EdgeType.FLAT : (r % 2 === 0 ? EdgeType.OUT : EdgeType.IN);
 
       pieceShapes[r][c] = shape;
     }
   }
 
-  // 2. Generar los datos de cada pieza y su slot correspondiente
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       const id = `r${r}c${c}`;
       const shape = pieceShapes[r][c];
       
-      const spawnAreaY = boardMargin + boardHeight + 50;
-      const initialX = Math.random() * (screenWidth - pieceSizeOnScreen);
-      const initialY = spawnAreaY + Math.random() * (screenHeight - spawnAreaY - pieceSizeOnScreen);
+      const spawnAreaX = boardMargin + boardWidth + 50;
+      const spawnAreaWidth = screenWidth - spawnAreaX - boardMargin;
+      const spawnAreaY = boardMargin;
+      const spawnAreaHeight = screenHeight - (boardMargin * 2);
+
+      const initialX = spawnAreaX + Math.random() * (spawnAreaWidth - pieceSizeOnScreen * 1.5);
+      const initialY = spawnAreaY + Math.random() * (spawnAreaHeight - pieceSizeOnScreen * 1.5);
       
       slots.push({ id, x: c * pieceSizeOnScreen, y: r * pieceSizeOnScreen });
 
       pieces.push({
         id,
         shape,
-        svgClipPath: buildPiecePath(shape, pieceSizeInImage), // La forma se basa en el tamaño de la imagen
+        svgClipPath: buildPiecePath(shape, pieceSizeInImage),
         sourceX: c * pieceSizeInImage,
         sourceY: r * pieceSizeInImage,
         initialX,
@@ -165,10 +174,10 @@ export const generatePuzzle = (config: PuzzleConfig): PuzzleData => {
   }
 
   return {
-    pieces: pieces.sort(() => 0.5 - Math.random()), // Baraja las piezas
+    pieces: pieces.sort(() => 0.5 - Math.random()),
     slots,
     boardSize: { width: boardWidth, height: boardHeight },
-    pieceSize: pieceSizeOnScreen, // El tamaño en la pantalla
+    pieceSize: pieceSizeOnScreen,
     pieceSizeInImage,
     image
   };

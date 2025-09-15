@@ -11,14 +11,18 @@
   },
   "dependencies": {
     "@react-native/new-app-screen": "0.81.4",
+    "@svgdotjs/svg.js": "^3.2.4",
+    "jsdom": "^27.0.0",
     "react": "19.1.0",
     "react-native": "0.81.4",
+    "react-native-confetti-cannon": "^1.5.2",
     "react-native-gesture-handler": "^2.28.0",
     "react-native-reanimated": "^4.1.0",
     "react-native-safe-area-context": "^5.5.2",
     "react-native-svg": "^15.13.0",
     "react-native-worklets": "^0.5.1",
-    "react-native-worklets-core": "^1.6.2"
+    "react-native-worklets-core": "^1.6.2",
+    "sharp": "^0.34.3"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
