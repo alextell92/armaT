@@ -7,7 +7,7 @@ import {
   ImageSourcePropType,
   Text,
   TouchableOpacity,
-  Vibration
+  Vibration,
 } from 'react-native';
 import {
   GestureHandlerRootView,
@@ -24,11 +24,10 @@ import Animated, {
   withTiming,
   interpolate,
   withSequence,
-  // --- CAMBIO (Stagger/Lag): Importar 'withDelay' ---
   withDelay,
 } from 'react-native-reanimated';
 import LinearGradient from 'react-native-linear-gradient';
-import ConfettiCannon from 'react-native-confetti-cannon'; // Importar Confeti
+import ConfettiCannon from 'react-native-confetti-cannon';
 
 // --- (Carga de Assets: Dinámica) ---
 import * as LevelAssets from './assets/puzzles/mundo1/nivel1/level.assets.js';
@@ -82,7 +81,7 @@ const shuffleArray = (array: any[]) => {
   return newArray;
 };
 
-// --- (Componente PuzzlePiece: Sin cambios) ---
+// --- (Componente PuzzlePiece: CON BUGFIX DEL REGRESO) ---
 interface PuzzlePieceProps {
   piece: PieceDataWithLayout;
   isPlaced: boolean;
@@ -119,7 +118,10 @@ const PuzzlePiece: React.FC<PuzzlePieceProps> = ({
   const rotate = useSharedValue('0deg');
   const glow = useSharedValue(0); 
   const isSnapped = useSharedValue(isPlaced);
-   const shake = useSharedValue(0); // <-- AÑADE ESTA LÍNEA
+  const shake = useSharedValue(0); 
+  
+  // --- BUGFIX DEL REGRESO: Nuevo estado para el "limbo" de regreso ---
+  const isReturning = useSharedValue(false);
 
   useEffect(() => {
     if (isPlaced) {
@@ -129,7 +131,8 @@ const PuzzlePiece: React.FC<PuzzlePieceProps> = ({
       rotate.value = withSpring('0deg');
       isSnapped.value = true; 
     } else {
-      if (!isDragging.value) {
+      // Si no estamos arrastrando Y no estamos volviendo... resetea
+      if (!isDragging.value && !isReturning.value) {
         position.value = withSpring({ x: initialX, y: initialY });
         scale.value = withSpring(stripScale);
         zIndex.value = 10;
@@ -152,6 +155,7 @@ const PuzzlePiece: React.FC<PuzzlePieceProps> = ({
     rotate,
     glow,
     isSnapped,
+    isReturning, // <-- Añadir dependencia
   ]);
 
   const gesture = Gesture.Pan()
@@ -183,6 +187,7 @@ const PuzzlePiece: React.FC<PuzzlePieceProps> = ({
         Math.pow(finalX - targetX, 2) + Math.pow(finalY - targetY, 2),
       );
       if (dist < SNAP_THRESHOLD) {
+        // ... (Lógica de Snap, sin cambios)
         isSnapped.value = true; 
         position.value = withSpring({ x: targetX, y: targetY });
         zIndex.value = 1;
@@ -198,42 +203,63 @@ const PuzzlePiece: React.FC<PuzzlePieceProps> = ({
           withTiming(0, { duration: 300 })
         );
       } else {
-         // --- NUEVO: Feedback SECUENCIAL (Vibrar, LUEGO regresar) ---
-        
-      
-        
+        // --- BUGFIX DEL REGRESO (CON SINTAXIS CORREGIDA) ---
         runOnJS(Vibration.vibrate)(100);
-        zIndex.value = 10; 
+        zIndex.value = 10;
+        isReturning.value = true; // 1. Activa el modo "regresando"
 
         const SHAKE_AMOUNT = 10;
         const SHAKE_DURATION = 60;
         
-        shake.value = withSequence(
-          // ...las primeras 3 animaciones del shake...
-          withTiming(-SHAKE_AMOUNT, { duration: SHAKE_DURATION }),
-          withTiming(SHAKE_AMOUNT, { duration: SHAKE_DURATION * 2 }),
-          withTiming(-SHAKE_AMOUNT, { duration: SHAKE_DURATION * 2 }),
+        // 2. Tiembla EN EL LUGAR (posición absoluta 'finalX')
+        position.value = withSequence(
+          withTiming({ x: finalX - SHAKE_AMOUNT, y: finalY }, { duration: SHAKE_DURATION }),
+          withTiming({ x: finalX + SHAKE_AMOUNT, y: finalY }, { duration: SHAKE_DURATION * 2 }),
+          withTiming({ x: finalX - SHAKE_AMOUNT, y: finalY }, { duration: SHAKE_DURATION * 2 }),
 
-          // El callback va AQUÍ, como segundo argumento del ÚLTIMO withTiming
-          withTiming(0, { duration: SHAKE_DURATION }, () => {
-            'worklet'; 
-            // Esto se ejecuta CUANDO TERMINA EL SHAKE
-            position.value = withSpring({ x: initialX, y: initialY }, { damping: 25, stiffness: 180 });
-            scale.value = withSpring(stripScale);
-          })
-          // El callback NO va aquí afuera
-        );
-        // --- FIN DE LA CORRECCIÓN ---
+        withTiming({ x: finalX, y: finalY }, { duration: SHAKE_DURATION }, () => {
+              'worklet'; 
+              const visualReturnX = initialX - scrollX.value;
+              
+              // 5. Anima al destino VISUAL
+              position.value = withSpring(
+                { x: visualReturnX, y: initialY }, 
+                { damping: 15, stiffness: 120 },
+
+                // --- CORRECCIÓN DE LINTER ---
+                // Ahora usamos el argumento 'finished'
+                (finished) => {
+                  'worklet';
+                  // Solo resetea el estado si la animación terminó con éxito
+                  if (finished) { 
+                   // --- CORRECCIÓN DE TIPO ---
+                    // position.value debe ser un objeto {x, y}
+                    position.value = { x: initialX, y: initialY };
+                    // --- FIN DE CORRECCIÓN ---
+                    isReturning.value = false;
+                  }
+                }
+                // --- FIN DE LA CORRECCIÓN ---
+              );
+              // 9. Encoge la pieza AL MISMO TIEMPO
+              scale.value = withSpring(stripScale);
+            }) 
+          ); 
       }
     });
 
   const animatedStyle = useAnimatedStyle(() => {
+    // --- BUGFIX DEL REGRESO: Lógica de displayX actualizada ---
+    // La pos es absoluta SI: arrastramos, está embonada, O está regresando.
     const displayX = 
-      isDragging.value || isSnapped.value 
+      isDragging.value || isSnapped.value || isReturning.value
         ? position.value.x
         : position.value.x - scrollX.value;
+    // --- FIN DEL BUGFIX ---
+        
     const displayY = position.value.y;
- const shakeOffset = shake.value;
+    const shakeOffset = shake.value;
+
     return {
       position: 'absolute',
       width: layout.pieceAssetRenderSize,
@@ -242,7 +268,7 @@ const PuzzlePiece: React.FC<PuzzlePieceProps> = ({
       transform: [
         { translateX: displayX },
         { translateY: displayY },
-         { translateX: shakeOffset },
+        { translateX: shakeOffset }, 
         { scale: scale.value },
         { rotate: rotate.value },
       ],
@@ -272,18 +298,15 @@ const PuzzlePiece: React.FC<PuzzlePieceProps> = ({
   );
 };
 
-// --- (Componente App: Con cambios para escalonar animación) ---
+// --- (Componente App: Sin cambios) ---
 const App: React.FC = () => {
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const isTablet = screenWidth > 768;
   const [shuffleSeed, setShuffleSeed] = useState(0);
   const stripScrollViewRef = useRef<Animated.ScrollView>(null);
-  
-  // --- CAMBIO (Stagger/Lag): Nuevo estado para el confeti ---
   const [showConfetti, setShowConfetti] = useState(false);
 
   const boardLayout = useMemo((): BoardLayout => {
-    // ... (sin cambios)
     const { gridSize, imageAspectRatio } = puzzleData;
     const stripHeight = isTablet ? 150 : 120;
     const boardPadding = 20;
@@ -319,7 +342,6 @@ const App: React.FC = () => {
   }, [screenWidth, screenHeight, isTablet]);
 
   const pieceData = useMemo((): PieceDataWithLayout[] => {
-    // ... (sin cambios)
     if (!boardLayout) return [];
     const pieceOffset = boardLayout.pieceSizeOnScreen * 0.25;
     const unscaledAssetSize = boardLayout.pieceAssetRenderSize;
@@ -369,7 +391,6 @@ const App: React.FC = () => {
       : 0;
 
   const onPiecePlaced = (id: string) => {
-    // ... (sin cambios)
     const newPlacedIds = new Set(placedPieceIds);
     newPlacedIds.add(id);
     setPlacedPieceIds(newPlacedIds);
@@ -412,26 +433,19 @@ const App: React.FC = () => {
     );
   };
 
-  // --- CAMBIO (Stagger/Lag): 'useEffect' modificado ---
   useEffect(() => {
     if (allPiecesPlaced) {
-      // Retrasamos las animaciones de victoria para dar tiempo al "glow"
-      const DELAY_MS = 500; // Medio segundo
-
-      // 1. Animar los valores del UI Thread (banner y fondo) con retraso
+      const DELAY_MS = 500; 
       winAnimation.value = withDelay(DELAY_MS, withTiming(1, { duration: 600 }));
       backgroundOpacity.value = withDelay(DELAY_MS, withTiming(1.0, { duration: 1200 }));
-      
-      // 2. Activar el confeti (JS Thread) después del retraso
       setTimeout(() => {
         setShowConfetti(true);
       }, DELAY_MS);
 
     } else {
-      // Si no están todas puestas (ej. al reiniciar), ocultamos el confeti
       setShowConfetti(false);
     }
-  }, [allPiecesPlaced, winAnimation, backgroundOpacity]); // 'allPiecesPlaced' es el trigger
+  }, [allPiecesPlaced, winAnimation, backgroundOpacity]);
 
   const handleResetLevel = () => {
     winAnimation.value = withTiming(0, { duration: 300 });
@@ -439,12 +453,9 @@ const App: React.FC = () => {
     setShuffleSeed((s) => s + 1);
     backgroundOpacity.value = withTiming(0.3, { duration: 300 });
     glowAnimation.value = 0;
-    // (no necesitamos resetear showConfetti aquí, el useEffect anterior lo hará)
   };
 
-  // --- (Estilos Animados: Sin cambios) ---
   const animatedWinStyle = useAnimatedStyle(() => {
-    // ... (sin cambios)
     const opacity = winAnimation.value;
     const translateY = interpolate(winAnimation.value, [0, 1], [30, 0]);
     return {
@@ -464,14 +475,12 @@ const App: React.FC = () => {
   });
   
   const animatedBackgroundStyle = useAnimatedStyle(() => {
-    // ... (sin cambios)
     return {
       opacity: backgroundOpacity.value,
     };
   });
 
   const animatedMainGlowStyle = useAnimatedStyle(() => {
-    // ... (sin cambios)
     const scale = interpolate(glowAnimation.value, [0, 1], [0.8, 1.8]);
     const opacity = interpolate(glowAnimation.value, [0, 0.5, 1], [0, 0.7, 0]);
     return {
@@ -489,10 +498,9 @@ const App: React.FC = () => {
     return <View style={styles.root} />;
   }
 
-  // --- (Render: Con cambio en Confeti) ---
   return (
     <GestureHandlerRootView style={styles.root}>
-      {/* 1. El Tablero */}
+      {/* ... (Todo el JSX sin cambios) ... */}
       <View
         style={[
           styles.boardContainer,
@@ -510,8 +518,6 @@ const App: React.FC = () => {
           resizeMode="stretch"
         />
       </View>
-
-      {/* 2. La Tira Deslizable */}
       <AnimatedScrollView
         ref={stripScrollViewRef} 
         horizontal
@@ -527,8 +533,6 @@ const App: React.FC = () => {
         contentContainerStyle={{ width: stripContentWidth }}
         showsHorizontalScrollIndicator={false}
       />
-
-      {/* 3. Las Piezas */}
       <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
         {pieceData.map((piece) => (
           <PuzzlePiece
@@ -542,8 +546,6 @@ const App: React.FC = () => {
           />
         ))}
       </View>
-
-      {/* 4. El Resplandor Principal */}
       <Animated.View style={animatedMainGlowStyle}>
         <AnimatedLinearGradient
           colors={['#FFD700', 'rgba(255,215,0,0.5)', 'rgba(255,215,0,0)']}
@@ -552,8 +554,6 @@ const App: React.FC = () => {
           style={styles.mainGlow}
         />
       </Animated.View>
-
-      {/* 5. Contenedor de Victoria Animado */}
       <Animated.View style={animatedWinStyle}>
         <Text style={styles.winTitle}>¡Felicidades!</Text>
         <View style={isTablet ? styles.buttonsRow : styles.buttonsColumn}>
@@ -572,7 +572,6 @@ const App: React.FC = () => {
         </View>
       </Animated.View>
 
-      {/* --- CAMBIO (Stagger/Lag): Confeti renderizado por estado --- */}
       {showConfetti && (
         <ConfettiCannon
           count={200}
@@ -581,7 +580,7 @@ const App: React.FC = () => {
           explosionSpeed={400}
           fallSpeed={3000}
           fadeOut={true}
-        
+          // Quitamos el 'style' que daba error
         />
       )}
 
